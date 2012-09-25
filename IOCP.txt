@@ -1,0 +1,221 @@
+http://laokaddk.blog.51cto.com/blog/368606/610780
+
+IOCP相关的一些总结
+ 
+1：在IOCP中投递WSASend返回WSA_IO_PENDING的时候，表示异步投递已经成功，但是稍后发送才会完成。这其中涉及到了三个缓冲区。
+网卡缓冲区，TCP/IP层缓冲区，程序缓冲区。
+情况一：调用WSASend发送正确的时候（即立即返回，且没有错误），TCP/IP将数据从程序缓冲区中拷贝到TCP/IP层缓冲区中，然后不锁定该程序缓冲区，由上层程序自己处理。TCP/IP层缓冲区在网络合适的时候，将其数据拷贝到网卡缓冲区，进行真正的发送。
+情况二：调用WSASend发送错误，但是错误码是WSA_IO_PENDING的时候，表示此时TCP/IP层缓冲区已满，暂时没有剩余的空间将程序缓冲区的数据拷贝出来，这时系统将锁定用户的程序缓冲区，按照书上说的WSASend指定的缓冲区将会被锁定到系统的非分页内存中。直到TCP/IP层缓冲区有空余的地方来接受拷贝我们的程序缓冲区数据才拷贝走，并将给IOCP一个完成消息。
+情况三：调用WSASend发送错误，但是错误码不是WSA_IO_PENDING，此时应该是发送错误，应该释放该SOCKET对应的所有资源。
+
+2：在IOCP中投递WSARecv的时候，情况相似。
+情况一：调用WSARecv正确，TCP/IP将数据从TCP/IP层缓冲区拷贝到缓冲区，然后由我们的程序自行处理了。清除TCP/IP层缓冲区数据。
+情况二：调用WSARecv错误，但是返回值是WSA_IO_PENDING，此时是因为TCP/IP层缓冲区中没有数据可取，系统将会锁定我们投递的WSARecv的buffer，直到TCP/IP层缓冲区中有新的数据到来。
+情况三：调用WSARecv错误，错误值不是WSA_IO_PENDING，此时是接收出错，应该释放该SOCKET对应的所有资源。
+
+在以上情况中有几个非常要注意的事情：
+系统锁定非分页内存的时候，最小的锁定大小是4K(当然，这个取决于您系统的设置，也可以设置小一些，在注册表里面可以改，当然我想这些数值微软应该比我们更知道什么合适了)，所以当我们投递了很多WSARecv或者WSASend的时候，不管我们投递的Buffer有多大（0除外），系统在出现IO_PENGDING的时候，都会锁定我们4K的内存。这也就是经常有开发者出现WSANOBUF的情况原因了。
+
+我们在解决这个问题的时候，要针对WSASend和WSARecv做处理
+1：投递WSARecv的时候，可以采用一个巧妙的设计，先投递0大小Buf的WSARecv，如果返回，表示有数据可以接收，我们开启真正的recv将数据从TCP/IP层缓冲区取出来，直到WSA_IO_PENGDING.
+2：对投递的WSARecv以及WSASend进行计数统计，如果超过了我们预定义的值，就不进行WSASend或者WSARecv投递了。
+3:现在我们应该就可以明白为什么WSASend会返回小于我们投递的buffer空间数据值了，是因为TCP/IP层缓冲区小于我们要发送的缓冲区，TCP/IP只会拷贝他剩余可被Copy的缓冲区大小的数据走，然后给我们的WSASend的已发送缓冲区设置为移走的大小，下一次投递的时候，如果TCP/IP层还未被发送，将返回WSA_IO_PENGDING。
+4：在很多地方有提到，可以关闭TCP/IP层缓冲区，可以提高一些效率和性能，这个从上面的分析来看，有这个可能，要实际的网络情况去实际分析了。
+
+ 
+
+
+==================
+
+关于数据包在应用层乱序问题就不多说了(IOCP荒废了TCP在传输层辛辛苦苦保证的有序)。
+
+这无关紧要，因为iocp要管理上千个SOCKET,每个SOCKET的读请求、写请求分别保证串行即可。
+
+ 
+
+=============
+
+关于GetQueuedCompletionStatus的返回值判断：
+
+我给超时值传的是0，直接测试，无须等待。
+
+这里我们关心这几个值：
+
+第二个参数所传回的byte值
+
+第三个参数所传回的complete key值 ——PER HANDLE DATA
+
+第四个参数所传回的OVERLAPPED结构指针 ——PER IO DATA
+
+系统设置的ERROR值。
+
+ 
+
+在超时情况下，byte值返回0，per handle data值是-1，per io data为NULL
+
+ 
+
+1.如果返回FALSE
+
+    one ： iocp句柄在外部被关闭。
+
+   WSAGetLastError返回6（无效句柄），byte值返回0，per handle data值是-1，per io data为NULL
+
+ 
+
+    two: 我们主动close一个socket句柄，或者CancelIO(socket)（且此时有未决的操作）
+
+    WSAGetLastError返回995（由于线程退出或应用程序请求，已放弃 I/O 操作）
+
+   byte值为0，
+
+   per handle data与per io data正确传回。
+
+ 
+
+   three：对端强退（且此时本地有未决的操作）
+
+   WSAGetLastError返回64（指定的网络名不再可用）
+
+  byte值为0，per handle data与per io data正确传回 
+
+ 
+
+ 
+
+2.如果返回TRUE【此时一定得到了你投递的OVERLAP结构】
+
+    one:  我接收到对端数据，然后准备再投递接收请求；但此期间，对端关闭socket。
+
+   WSARecv返回错误码10054：远程主机强迫关闭了一个现有的连接。
+
+TODO TODO
+
+   从网上搜到一个做法，感觉很不错：
+
+如果返回FALSE, 那么：如果OVERLAP为空，那一定是发生了错误(注意：请排除TIMEOUT错误)；
+
+如果OVERLAP不为空，有可能发生错误。不用管它，这里直接投递请求；如果有错，WSARecv将返回错误。关闭连接即可。
+
+=================================================================
+
+
+http://www.cppblog.com/Fox/archive/2011/04/19/95975.html
+
+在使用IOCP时，最重要的几个API就是GetQueueCompeltionStatus、WSARecv、WSASend，数据的I/O及其完成状态通过这几个接口获取并进行后续处理。
+
+GetQueueCompeltionStatus attempts to dequeue an I/O completion packet from the specified I/O completion port. If there is no completion packet queued, the function waits for a pending I/O operation associated with the completion port to complete.
+
+BOOL WINAPI GetQueuedCompletionStatus(
+  __in   HANDLE CompletionPort,
+  __out  LPDWORD lpNumberOfBytes,
+  __out  PULONG_PTR lpCompletionKey,
+  __out  LPOVERLAPPED *lpOverlapped,
+  __in   DWORD dwMilliseconds
+);
+If the function dequeues a completion packet for a successful I/O operation from the completion port, the return value is nonzero. The function stores information in the variables pointed to by the lpNumberOfBytes, lpCompletionKey, and lpOverlapped parameters.
+
+除了关心这个API的in & out（这是MSDN开头的几行就可以告诉我们的）之外，我们更加关心不同的return & out意味着什么，因为由于各种已知或未知的原因，我们的程序并不总是有正确的return & out。
+
+If *lpOverlapped is NULL and the function does not dequeue a completion packet from the completion port, the return value is zero. The function does not store information in the variables pointed to by the lpNumberOfBytes and lpCompletionKey parameters. To get extended error information, call GetLastError. If the function did not dequeue a completion packet because the wait timed out, GetLastError returns WAIT_TIMEOUT.
+
+假设我们指定dwMilliseconds为INFINITE。
+
+这里常见的几个错误有：
+
+WSA_OPERATION_ABORTED (995): Overlapped operation aborted.
+
+由于线程退出或应用程序请求，已放弃I/O 操作。
+
+MSDN: An overlapped operation was canceled due to the closure of the socket, or the execution of the SIO_FLUSH command in WSAIoctl. Note that this error is returned by the operating system, so the error number may change in future releases of Windows.
+
+成因分析：这个错误一般是由于peer socket被closesocket或者WSACleanup关闭后，针对这些socket的pending overlapped I/O operation被中止。
+
+解决方案：针对socket，一般应该先调用shutdown禁止I/O操作后再调用closesocket关闭。
+
+严重程度：轻微易处理。
+
+WSAENOTSOCK (10038): Socket operation on nonsocket.
+
+MSDN: An operation was attempted on something that is not a socket. Either the socket handle parameter did not reference a valid socket, or for select, a member of an fd_set was not valid.
+
+成因分析：在一个非套接字上尝试了一个操作。
+
+使用closesocket关闭socket之后，针对该invalid socket的任何操作都会获得该错误。
+
+解决方案：如果是多线程存在对同一socket的操作，要保证对socket的I/O操作逻辑上的顺序，做好socket的graceful disconnect。
+
+严重程度：轻微易处理。
+
+WSAECONNRESET (10054): Connection reset by peer.
+
+远程主机强迫关闭了一个现有的连接。
+
+MSDN: An existing connection was forcibly closed by the remote host. This normally results if the peer application on the remote host is suddenly stopped, the host is rebooted, the host or remote network interface is disabled, or the remote host uses a hard close (see setsockopt for more information on the SO_LINGER option on the remote socket). This error may also result if a connection was broken due to keep-alive activity detecting a failure while one or more operations are in progress. Operations that were in progress fail with WSAENETRESET. Subsequent operations fail with WSAECONNRESET.
+
+成因分析：在使用WSAAccpet、WSARecv、WSASend等接口时，如果peer application突然中止（原因如上所述），往其对应的socket上投递的operations将会失败。
+
+解决方案：如果是对方主机或程序意外中止，那就只有各安天命了。但如果这程序是你写的，而你只是hard close，那就由不得别人了。至少，你要知道这样的错误已经出现了，就不要再费劲的继续投递或等待了。
+
+严重程度：轻微易处理。
+
+WSAECONNREFUSED (10061): Connection refused.
+
+由于目标机器积极拒绝，无法连接。
+
+MSDN: No connection could be made because the target computer actively refused it. This usually results from trying to connect to a service that is inactive on the foreign host—that is, one with no server application running.
+
+成因分析：在使用connect或WSAConnect时，服务器没有运行或者服务器的监听队列已满；在使用WSAAccept时，客户端的连接请求被condition function拒绝。
+
+解决方案：Call connect or WSAConnect again for the same socket. 等待服务器开启、监听空闲或查看被拒绝的原因。是不是长的丑或者钱没给够，要不就是服务器拒绝接受天价薪酬自主创业去了？
+
+严重程度：轻微易处理。
+
+WSAENOBUFS (10055): No buffer space available.
+
+由于系统缓冲区空间不足或列队已满，不能执行套接字上的操作。
+
+MSDN: An operation on a socket could not be performed because the system lacked sufficient buffer space or because a queue was full.
+
+成因分析：这个错误是我查看错误日志后，最在意的一个错误。因为服务器对于消息收发有明确限制，如果缓冲区不足应该早就处理了，不可能待到send/recv失败啊。而且这个错误在之前的版本中几乎没有出现过。这也是这篇文章的主要内容。像connect和accept因为缓冲区空间不足都可以理解，而且危险不高，但如果send/recv造成拥堵并恶性循环下去，麻烦就大了，至少说明之前的验证逻辑有疏漏。
+
+WSASend失败的原因是：The Windows Sockets provider reports a buffer deadlock. 这里提到的是buffer deadlock，显然是由于多线程I/O投递不当引起的。
+
+解决方案：在消息收发前，对最大挂起的消息总的数量和容量进行检验和控制。
+
+严重程度：严重。
+
+
+==================================
+
+GetQueueCompeltionStatus 恐怖的一沓糊涂，运行一段时间就蹦出些莫名的错误，我这辈子是不会再用了。。。socket万岁。 
+
+BOOL bSuccess = GetQueuedCompletionStatus(m_hCompletionPort, &dwNumberBytes, 
+&CompletionKey, (LPOVERLAPPED*)&overlap, 10);//10ms for cpu eat. 
+
+time_check(); 
+
+if (overlap) personal = overlap->content; 
+
+if (bSuccess == FALSE) 
+{ 
+DWORD LastError = GetLastError(); 
+if (LastError == WAIT_TIMEOUT) 
+continue; 
+
+// 2 - 系统找不到指定的文件。 
+// 121 - 信号灯超时时间已到。 
+
+// 1450 - 系统资源不足，无法完成请求的服务。 
+// 995 - 由于线程退出或应用程序请求，已放弃 I/O 操作。 
+
+// 64 - 指定的网络名不再可用。 
+// 10053 - 您的主机中的软件放弃了一个已建立的连接。 
+// 10054 - 远程主机强迫关闭了一个现有的连接 
+// 10058 - 由于以前的关闭调用，套接字在那个方向已经关闭，发送或接收数据的请求没有被接受。 
+
+// 0 - 操作成功完成。 
+// 997 - 重叠 I/O 操作在进行中。 
+// 998 - 内存分配访问无效。 (when fread() filesize > 3G) 
+
+========================================

@@ -1,0 +1,52 @@
+
+服务器:
+
+默认端口:4567
+请参考main.cpp代码,挺简单方便的
+
+自已的服务器类要从TUserServer类继承,而不是从TIOCPServer类继承
+
+1.接收:   HandleRecvMessage函数,用于处理收到的数据
+
+	重载以下函数以便接收通知:
+	virtual void OnConnectionEstablished(CIOCPContext *pContext, CIOCPBuffer *pBuffer) = 0;
+	virtual void OnConnectionClosing(CIOCPContext *pContext, CIOCPBuffer *pBuffer) = 0;
+	virtual void OnConnectionError(CIOCPContext *pContext, CIOCPBuffer *pBuffer, int nError) = 0;
+	virtual void OnReadCompleted(CIOCPContext *pContext, CIOCPBuffer *pBuffer)=0;
+	virtual void OnWriteCompleted(CIOCPContext *pContext, CIOCPBuffer *pBuffer)=0;
+
+	重载SplitPacket以便将接收到数据进行拼包,自行定义
+	virtual bool SplitPacket(CIOCPContext *pContext, CIOCPBuffer *pBuffer)=0;
+
+
+2.发送:
+1.调用AllocatePacket(),再构造好包参数即可
+2.调用bool SendPacket(PACKET* lpPacket)进行发包,因为使用队列,调用完此函数后,参数立即可以销毁
+
+
+
+修改记录:
+
+1.增加发送队列和线程
+
+  增加接收队列和线程
+
+2.修正了原代码中对接收乱序处理的一些错误
+
+3.改进了IOCP对接收完成通知的处理,将原来只有一个未决的WSARecv改为多次投递的重叠接收操作.
+  大大加快对接收的处理速度
+
+4.增加发送操作接口函数:bool SendPacket(PACKET* lpPacket),方便使用
+
+5.原代码的队列类有错误,倒序,现已修正
+
+6.原代码中类方法封装错误,现已改正
+
+问题:
+7.已对现用代码精心测试,但不敢保证无错误,特别是HandleIO函数中各种错误的处理
+
+8.个人觉得对CIOCPBuffer和CIOCPContext,Connection,CSessionMangage等的内存池的处理很高效简洁.
+
+9.不知那个队列类CQueue的速度怎样?没测过
+
+ 
