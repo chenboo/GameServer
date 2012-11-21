@@ -17,6 +17,7 @@ void main()
 		printf(" ·şÎñÆ÷¿ªÆôÊ§°Ü£¡\n");
 		return;
 	}
+
 /*    
     getchar();
 	CIOCPContext *m_pCCon;
