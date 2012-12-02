@@ -1,42 +1,44 @@
-//CServerSocket.h
 #ifndef _ServerSocket_H_
 #define _ServerSocket_H_
-#include <list>
+
 #include "IOCP.h"
 #include "..\log\log.h"
 #include "..\MsgDef\MsgDef.h"
+
+#include <list>
 using namespace std;
-typedef unsigned (WINAPI *PTHREADFUN)(LPVOID lpParameter); 
 
 template <class T>
 class CQueue : public list<T>
 {
-	CRITICAL_SECTION m_ListLock;
 public:
 	CQueue(void) 
 	{
 		::InitializeCriticalSection(&m_ListLock);
-
 	}
+
 	virtual ~CQueue(void) 
 	{
 		::DeleteCriticalSection(&m_ListLock);
 	}
 
 	unsigned long GetSize()
-	{ 
+	{
 		unsigned long m_size = 0;
+		
 		::EnterCriticalSection(&m_ListLock);
-		m_size =  size(); 
+		m_size = size(); 
 		::LeaveCriticalSection(&m_ListLock);
+		
 		return m_size;
 	}
 
 	void Push(T lpData)
 	{
 		::EnterCriticalSection(&m_ListLock);
-//		push_front(lpData);
+
 		push_back(lpData);
+		
 		::LeaveCriticalSection(&m_ListLock);
 	}
 
@@ -44,25 +46,36 @@ public:
 	{
 		T lpData = NULL;
 		::EnterCriticalSection(&m_ListLock);
+
 		if(size())
 		{
 			lpData = front();
 			pop_front(); 
 		}
+
 		::LeaveCriticalSection(&m_ListLock);
+
 		return lpData;
 	}
+
 	bool Empty()
 	{
 		bool bRet = false;
+	
 		::EnterCriticalSection(&m_ListLock);
-		bRet =  empty();
+
+		bRet = empty();
+
 		::LeaveCriticalSection(&m_ListLock);
+
 		return bRet;
 	}
+
+private::
+	CRITICAL_SECTION m_ListLock;
 };
 
-
+typedef unsigned (WINAPI *PTHREADFUN)(LPVOID lpParameter); 
 class CUserServer : public CIOCPServer
 {
 public:

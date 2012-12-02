@@ -1,39 +1,46 @@
+// todo: will update! this version is so bad.
+
 #include "log.h"
-#include <stdio.h>
 #include "..\utility\Utility.h"
+#include <stdio.h>
 #include <stdarg.h>
-int WriteToLog(char * szFormat, ...)
+
+int WriteToLog(char* szFormat, ...)
 {
-	char   szBuffer [1024] ;
-	va_list pArgList ;
+	char szBuffer[1024] ;
+	va_list pArgList;
 	va_start (pArgList, szFormat) ;
-	_vsnprintf( szBuffer, sizeof (szBuffer) / sizeof (char),
-		szFormat, pArgList) ;
+	_vsnprintf(szBuffer, sizeof(szBuffer) / sizeof(char), szFormat, pArgList) ;
 	va_end (pArgList) ;
-	FILE* log;
-	char inifile[256] = "";
-	GetFullPath("Error.txt",inifile);
-	log = fopen(inifile, "a+");
-	if (log == NULL)
-	{
+
+	char szLogFilePath[260] = {0};
+	GetFullPath("Error.txt", szLogFilePath);
+	
+	FILE* pLogFile;
+	pLogFile = fopen(szLogFilePath, "a+");
+	if (pLogFile == NULL) {
 		return -1;
 	}
-	fprintf(log, "%s\n", szBuffer);
-	fclose(log);
+
+	fprintf(pLogFile, "%s\n", szBuffer);
+	fclose(pLogFile);
 	return 0;
 }
-int WriteToScreen(char * szFormat, ...)
+
+int WriteToScreen(char* szFormat, ...)
 {
-	char   szBuffer [1024] ;
+	char szBuffer[1024] ;
+	
 	va_list pArgList ;
 	va_start (pArgList, szFormat) ;
-	_vsnprintf( szBuffer, sizeof (szBuffer) / sizeof (char),
-		szFormat, pArgList) ;
+	_vsnprintf( szBuffer, sizeof (szBuffer) / sizeof (char), szFormat, pArgList) ;
 	va_end (pArgList) ;
+	
 	printf("%s\n", szBuffer);
 	return 0;
 }
-void DumpBuffToFile(unsigned char* buf,int size)
+
+void DumpBuffToFile(unsigned char* buf, int nSize)
 {
     int i = 0;
 	char fileName[256] = "";
@@ -41,7 +48,7 @@ void DumpBuffToFile(unsigned char* buf,int size)
 
 	FILE *fp = fopen(fileName, "a+");
 
-	for (i=0; i<size; i++)
+	for (i=0; i<nSize; i++)
 	{			
 		fprintf(fp,"%02X ", buf[i]);
 
@@ -60,7 +67,7 @@ void DumpBuffToFile(unsigned char* buf,int size)
 	fprintf(fp,"\r\n");
 
 
-	for (i=0; i<size; i++)
+	for (i=0; i<nSize; i++)
 	{			
 		if (buf[i]>=32)// && buf[i]<=127)
 		{
@@ -84,6 +91,7 @@ void DumpBuffToFile(unsigned char* buf,int size)
 
 	fclose(fp);	
 }
+
 void DumpBuffToScreen(unsigned char* buf,int size)
 {
 
@@ -127,6 +135,7 @@ void DumpBuffToScreen(unsigned char* buf,int size)
 			printf(".");
 		}
 
-	}	 
+	}
+
 	printf("\r\n");
 }

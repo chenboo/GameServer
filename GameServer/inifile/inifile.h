@@ -1,4 +1,3 @@
-//file name :inifile.h
 #ifndef _DT_INI_H
 #define _DT_INI_H
 #include <stdio.h>
