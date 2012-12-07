@@ -8,32 +8,32 @@ CUserServer::CUserServer()
 	m_nFreePacketCount = 0;
 	::InitializeCriticalSection(&m_FreePacketListLock);
 }
+
 CUserServer::~CUserServer()
 {
 	m_pFreePacketList = NULL;
 	m_nMaxPacketBuffers = 0;
-	m_nFreePacketCount=0;
+	m_nFreePacketCount = 0;
+
 	FreePacket();
 	::DeleteCriticalSection(&m_FreePacketListLock);
 }
-PACKET *CUserServer::AllocatePacket()
-{
-	PACKET *pPacket = NULL;
 
-	// 为缓冲区对象申请内存
+PACKET* CUserServer::AllocatePacket()
+{
 	::EnterCriticalSection(&m_FreePacketListLock);
-	if(m_pFreePacketList == NULL)  // 内存池为空，申请新的内存
-	{
-		pPacket = (PACKET *)::HeapAlloc(GetProcessHeap(), 
-						HEAP_ZERO_MEMORY, sizeof(PACKET));
+	
+	PACKET *pPacket = NULL;
+	if(m_pFreePacketList == NULL) {
+		pPacket = (PACKET *)::HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PACKET));
 	}
-	else	// 从内存池中取一块来使用
-	{
+	else {
 		pPacket = m_pFreePacketList;
-		m_pFreePacketList = m_pFreePacketList->pNext;	
+		m_pFreePacketList = m_pFreePacketList->pNext;
 		pPacket->pNext = NULL;
-		m_nFreePacketCount --;
+		m_nFreePacketCount--;
 	}
+
 	::LeaveCriticalSection(&m_FreePacketListLock);
 
 	return pPacket;
@@ -43,168 +43,133 @@ void CUserServer::ReleasePacket(PACKET *pPacket)
 {
 	::EnterCriticalSection(&m_FreePacketListLock);
 
-	if(m_nFreePacketCount <= m_nMaxPacketBuffers)	// 将要释放的内存添加到空闲列表中
-	{
+	if(m_nFreePacketCount <= m_nMaxPacketBuffers) {
 		memset(pPacket, 0, sizeof(PACKET));
 		pPacket->pNext = m_pFreePacketList;
 		m_pFreePacketList = pPacket;
-		m_nFreePacketCount ++ ;
+		m_nFreePacketCount++ ;
 	}
-	else			// 已经达到最大值，真正的释放内存
-	{
+	else {
 		::HeapFree(::GetProcessHeap(), 0, pPacket);
 	}
+
 	::LeaveCriticalSection(&m_FreePacketListLock);
 }
 
 void CUserServer::FreePacket()
 {
-	// 遍历m_pFreeBufferList空闲列表，释放缓冲区池内存
 	::EnterCriticalSection(&m_FreePacketListLock);
 
 	PACKET *pFreePacket = m_pFreePacketList;
-	PACKET *pNextPacket;
-	while(pFreePacket != NULL)
-	{
+	PACKET *pNextPacket = NULL;
+	while(pFreePacket != NULL) {
 		pNextPacket = pFreePacket->pNext;
-		if(!::HeapFree(::GetProcessHeap(), 0, pFreePacket))
-		{
+		if(!::HeapFree(::GetProcessHeap(), 0, pFreePacket)) {
 #ifdef _DEBUG
 			::OutputDebugString("  FreeBuffers释放内存出错！");
-#endif // _DEBUG
+#endif
 			break;
 		}
-		else
-		{
+		else {
 #ifdef _DEBUG
 			OutputDebugString("  FreeBuffers释放内存！");
-#endif // _DEBUG
+#endif
 		}
 
 		pFreePacket = pNextPacket;
 	}
+
 	m_pFreePacketList = NULL;
 	m_nFreePacketCount = 0;
 
 	::LeaveCriticalSection(&m_FreePacketListLock);
 }
 
-//做好分配好内存等初始化工作
 void CUserServer::IniServer()
 {
 	int i = 0;
-	//  分配好per-I/O
     CIOCPBuffer *pBuffer[3000];
-	for (i = 0; i< 3000; i++)
-	{
+	for (i = 0; i < 3000; i++) {
 		pBuffer[i] = AllocateBuffer(BUFFER_SIZE);
 	}
-	for (i = 0; i< 3000; i++)
-	{
+
+	for (i = 0; i< 3000; i++) {
 		ReleaseBuffer(pBuffer[i]);
 	}
     
-	//  分配好per-Handle
 	SOCKET s;
     CIOCPContext *pContext[100];
     for (i = 0; i< 100; i++)
 	{
 		pContext[i] = AllocateContext(s);
 	}
+
 	for (i = 0; i< 100; i++)
 	{
 		ReleaseContext(pContext[i]);
 	}
 
-	//  分配好PACKET  
     PACKET *pPacket[3000];
 	for (i = 0; i< 3000; i++)
 	{
 		pPacket[i] = AllocatePacket();
 	}
+
 	for (i = 0; i< 3000; i++)
 	{
 		ReleasePacket(pPacket[i]);
 	}
- 
 }
 
 bool CUserServer::StartupAllMsgThread()
 {
 	m_bRecvRun =true;
 	m_hRecvThread = NULL;
-	m_hRecvWait = NULL;
-	m_hRecvWait = CreateEvent(NULL,FALSE,FALSE,NULL);
-	if (m_hRecvWait==NULL)
+	m_hRecvWaitEvent = NULL;
+	m_hRecvWaitEvent = CreateEvent(NULL,FALSE,FALSE,NULL);
+	if (m_hRecvWaitEvent==NULL)
 		return false;
+
 	m_hRecvThread = reinterpret_cast<HANDLE>(_beginthreadex(NULL, NULL, (PTHREADFUN) RecvThread, this, 0, NULL)); 
 	if (m_hRecvThread == NULL) 
-	{ 
 		return false;
-	}
 
 	m_bSendRun = true;
 	m_hSendThread = NULL;
-	m_hSendWait = NULL;
-	m_hSendWait = CreateEvent(NULL,FALSE,FALSE,NULL);
-	if (m_hSendWait==NULL)
+	m_hSendWaitEvent = NULL;
+	m_hSendWaitEvent = CreateEvent(NULL,FALSE,FALSE,NULL);
+	if (!m_hSendWaitEvent)
 		return false;
-	m_hSendThread = reinterpret_cast<HANDLE>(_beginthreadex(NULL, NULL, (PTHREADFUN) SendThread, this, 0, NULL)); 
-	if (m_hSendThread == NULL) 
-	{ 
-		return false;
-	}
-	//m_bDelayRun = true;
-	//m_hDelayThread = NULL;
-	//m_hDelayWait = NULL;
-	//m_hDelayWait = CreateEvent(NULL,FALSE,FALSE,NULL);
-	//if (m_hDelayWait==NULL)
-	//	return false;
-	//m_hDelayThread = reinterpret_cast<HANDLE>(_beginthreadex(NULL, NULL, (PTHREADFUN) DelayThread, this, 0, NULL)); 
-	//if (m_hDelayThread == NULL) 
-	//{ 
-	//	return false;
-	//} 
-	return true;
 
+	m_hSendThread = reinterpret_cast<HANDLE>(_beginthreadex(NULL, NULL, (PTHREADFUN)SendThread, this, 0, NULL)); 
+	if (m_hSendThread == NULL) 
+		return false;
+	
+	return true;
 }
+
 void CUserServer::CloseAllMsgThread()
 {
 	m_bRecvRun = false;
-	SetEvent(m_hRecvWait);
+	SetEvent(m_hRecvWaitEvent);
 	if(WaitForSingleObject(m_hRecvThread,10000)!= WAIT_OBJECT_0)
 		TerminateThread(m_hRecvThread, 0);
+	
 	CloseHandle(m_hRecvThread);
-	CloseHandle(m_hRecvWait);
+	CloseHandle(m_hRecvWaitEvent);
+	
 	m_bSendRun = false;
-	SetEvent(m_hSendWait);
+	SetEvent(m_hSendWaitEvent);
 	if(WaitForSingleObject(m_hSendThread,10000)!= WAIT_OBJECT_0)
 		TerminateThread(m_hSendThread, 0);
+	
 	CloseHandle(m_hSendThread);
-	CloseHandle(m_hSendWait);
-	//m_bDelayRun = false;
-	//SetEvent(m_hDelayWait);
-	//if(WaitForSingleObject(m_hDelayThread,10000)!= WAIT_OBJECT_0)
-	//	TerminateThread(m_hDelayThread, 0);
-	//CloseHandle(m_hDelayThread);
-	//CloseHandle(m_hDelayWait);
+	CloseHandle(m_hSendWaitEvent);
 }
 
-//将游戏包以WSASend方式发送到IOCP上
 void CUserServer::SendPacketToIOCP(PACKET* lpPacket)
 {
-	printf("%d| %d| %d| %d| %d|Allocate %d|Release %d|SendSize %d \n", 
-				   lpPacket->nSequence, 
-				   lpPacket->nLen, 
-				   m_nFreeBufferCount,
-				   m_nFreeContextCount, 
-				   m_nFreePacketCount, 
-				   AllocateCount, 
-				   ReleaseCount ,
-				   m_listSendMsg.GetSize());
-
 	SendText(lpPacket->lpOCPContext, lpPacket->buf, lpPacket->nLen);
-//	printf(" 队列包数量: %d 空闲包数量: %d \n",lpPacket->nSequence, m_nFreePacketCount );
 }
 
 //用户层将游戏数据包发送到发送队列
@@ -212,50 +177,41 @@ bool CUserServer::SendPacket(PACKET* lpPacket)
 {
   //复制包,然后才加入发送队列,避免包还没发送出去,用户就销毁	
 	PACKET *lpP = AllocatePacket();
-    if(lpP!=NULL)
-    {
-		memcpy(lpP,lpPacket,sizeof(_PACKET));
-//		lpP->lpOCPContext = lpPacket->lpOCPContext;
+    if(lpP) {
+		memcpy(lpP, lpPacket, sizeof(PACKET));
         AddPacketToSendlist(lpP);
         return true ;
     }
+
     return false;
-/*//如果这样,将导致包还没发送出去,用户就销毁包,出现访存错误
-    if(lpPacket!=NULL)
-    {
-        AddPacketToSendlist(lpPacket);
-        return true ;
-    }
-    return false;
-*/
 }
 
 DWORD WINAPI CUserServer ::RecvThread(LPVOID lpParameter)
 {
 	CUserServer *lpUserServer = (CUserServer*)lpParameter;
+
 	while (lpUserServer->m_bRecvRun)
 	{
 		PACKET* lpPacket = NULL;
 		if(!lpUserServer->m_listRecvMsg.Empty())
 		{
-//          	printf("接收队列包总数:%d \n", lpUserServer->m_listRecvMsg.GetSize());
 			lpPacket = lpUserServer->PopPacketFromRecvList();
 			if(lpPacket !=NULL)
 			{
 				lpUserServer->HandleRecvMessage(lpPacket);
-
 				lpUserServer->ReleasePacket(lpPacket);
 			}
 		}
 		//接收列表中有包时受信
 		else
 		{
-  		    WaitForSingleObject(lpUserServer->m_hRecvWait,1);
+  		    WaitForSingleObject(lpUserServer->m_hRecvWaitEvent,1);
 		}
 	}
-	return 0;
 
+	return 0;
 }
+
 DWORD WINAPI CUserServer::SendThread(LPVOID lpParameter)
 {
 	CUserServer *lpUserServer = (CUserServer*)lpParameter;
@@ -264,30 +220,23 @@ DWORD WINAPI CUserServer::SendThread(LPVOID lpParameter)
 		PACKET* lpPacket = NULL;
 		if(!lpUserServer->m_listSendMsg.Empty())
 		{
-//	         	printf("发送队列包总数:%d \n", lpUserServer->m_listSendMsg.GetSize());
 			lpPacket = lpUserServer->PopPacketFromSendList();
 			if(lpPacket !=NULL)
 			{
-				//lpUserServer->OnSendMessageCompleted(lpPacket);
-
 				lpUserServer->SendPacketToIOCP(lpPacket);
-
 				lpUserServer->ReleasePacket(lpPacket);
 			}
 		}
 		//发送列表中有包时受信
 		else
 		{
-		    WaitForSingleObject(lpUserServer->m_hSendWait,1);
+		    WaitForSingleObject(lpUserServer->m_hSendWaitEvent,1);
 		}
 	}
 
 	return 0;
 }
-//DWORD WINAPI lpUserServer::DelayThread(LPVOID lpParameter)
-//{
-//	return 0;
-//}
+
 void CUserServer::OnConnectionEstablished(CIOCPContext *pContext, CIOCPBuffer *pBuffer)
 {
 	printf(" 接收到一个新的连接（%d）： %s \n", 
@@ -312,7 +261,7 @@ void CUserServer::OnReadCompleted(CIOCPContext *pContext, CIOCPBuffer *pBuffer)
 //	printf("%d | %d | %d | AllocateCount %d | ReleaseCount %d | %d \n", pBuffer->nSequenceNumber,m_nFreeBufferCount,m_nFreeContextCount, AllocateCount, ReleaseCount ,GetIOCPBufferCount()/*,pBuffer->buff*/);
 
 	//拼包处理
-	SplitPacket(pContext,pBuffer);
+	SplitPacket(pContext, pBuffer);
 //	SendText(pContext, pBuffer->buff, pBuffer->nLen);
 }
 
@@ -324,9 +273,8 @@ void CUserServer::OnWriteCompleted(CIOCPContext *pContext, CIOCPBuffer *pBuffer)
 //拼包处理
 bool CUserServer::SplitPacket(CIOCPContext *pContext, CIOCPBuffer *pBuffer)
 {
-
 	PACKET *lpPacket = AllocatePacket();
-    if(lpPacket!=NULL)
+    if(lpPacket != NULL)
     {
 		lpPacket->nLen = pBuffer->nLen;
 		lpPacket->nSequence = pBuffer->nSequenceNumber;

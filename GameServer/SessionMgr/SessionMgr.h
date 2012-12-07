@@ -28,10 +28,10 @@ private:
 	void FreeSession();
 
 private:
-	CSession* m_pFreeSessionList;
-	CRITICAL_SECTION m_FreeSessionListLock;
-
 	int m_nFreeSessionCount;
 	int m_nMaxFreeSessions;
+
+	CSession* m_pFreeSessionList;
+	CRITICAL_SECTION m_FreeSessionListLock;
 };
 #endif

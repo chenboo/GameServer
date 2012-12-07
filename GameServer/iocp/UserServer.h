@@ -24,10 +24,12 @@ public:
 
 	unsigned long GetSize()
 	{
-		unsigned long m_size = 0;
 		
 		::EnterCriticalSection(&m_ListLock);
-		m_size = size(); 
+
+		unsigned long m_size = 0;
+		m_size = size();
+		
 		::LeaveCriticalSection(&m_ListLock);
 		
 		return m_size;
@@ -44,9 +46,9 @@ public:
 
 	T Pop()
 	{
-		T lpData = NULL;
 		::EnterCriticalSection(&m_ListLock);
 
+		T lpData = NULL;
 		if(size())
 		{
 			lpData = front();
@@ -60,10 +62,10 @@ public:
 
 	bool Empty()
 	{
-		bool bRet = false;
 	
 		::EnterCriticalSection(&m_ListLock);
 
+		bool bRet = false;
 		bRet = empty();
 
 		::LeaveCriticalSection(&m_ListLock);
@@ -80,79 +82,45 @@ class CUserServer : public CIOCPServer
 {
 public:
 	CUserServer();
-	~CUserServer();
+	virtual ~CUserServer();
 
 public:
-	void IniServer();     // 初始化，先分配好内存
+	void IniServer();
+	bool StartupAllMsgThread();
 
-    bool SendPacket(PACKET* lpPacket);  //用户层将游戏数据包发送到发送队列
-
-	bool StartupAllMsgThread();   //启动接收和发送队列
-
+	bool SendPacket(PACKET* lpPacket);
 	PACKET* AllocatePacket();
 	void ReleasePacket(PACKET *pPacket);
-//	void FreePacket();
 
-private:
-	CQueue<PACKET*> m_listRecvMsg;
-	CQueue<PACKET*> m_listSendMsg;
-	//CQueue<PACKET*> m_listDelayMsg;
-	//消息处理线程
 private:
 	void AddPacketToRecvlist(PACKET* lpPacket)
 	{
 		m_listRecvMsg.Push(lpPacket);
 	}
+
 	PACKET* PopPacketFromRecvList()
 	{
 		return m_listRecvMsg.Pop();
 	}
+
 	void AddPacketToSendlist(PACKET* lpPacket)
 	{
 		m_listSendMsg.Push(lpPacket);
 	}
+
 	PACKET* PopPacketFromSendList()
 	{
 		return m_listSendMsg.Pop();
 	}
-	//void AddPacketToDelaylist(PACKET* lpPacket)
-	//{
-	//	m_listDelayMsg.Push(lpPacket);
-	//}
-	//PACKET* PopPacketFromDelayList()
-	//{
-	//	return m_listDelayMsg.Pop();
-	//}
 
-	HANDLE m_hRecvWait,m_hSendWait/*,m_hDelayWait*/;
-	bool m_bRecvRun,m_bSendRun/*,m_bDelayRun*/;
-	HANDLE m_hRecvThread,m_hSendThread/*,m_hDelayThread*/;
-
-
-	void CloseAllMsgThread();
-
-	virtual void HandleRecvMessage(PACKET* lpPacket) = 0;
-	//将游戏包以WSASend方式发送到IOCP上
 	void SendPacketToIOCP(PACKET* lpPacket);
 
 	static DWORD WINAPI RecvThread(LPVOID lpParameter);
 	static DWORD WINAPI SendThread(LPVOID lpParameter);
-	//static DWORD WINAPI DelayThread(LPVOID lpParameter);
+	void CloseAllMsgThread();
 
+	virtual void HandleRecvMessage(PACKET* lpPacket) = 0;
 
-protected:
-/*
-	PACKET* AllocatePacket();
-	void ReleasePacket(PACKET *pPacket);
-*/	void FreePacket();
-
-private:
-	PACKET *m_pFreePacketList;
-	int m_nFreePacketCount;	
-	int m_nMaxPacketBuffers;
-	CRITICAL_SECTION m_FreePacketListLock;
-	//网络事件通知
-private:
 	void OnConnectionEstablished(CIOCPContext *pContext, CIOCPBuffer *pBuffer);
 	void OnConnectionClosing(CIOCPContext *pContext, CIOCPBuffer *pBuffer);
 	void OnConnectionError(CIOCPContext *pContext, CIOCPBuffer *pBuffer, int nError);
@@ -160,5 +128,22 @@ private:
 	void OnWriteCompleted(CIOCPContext *pContext, CIOCPBuffer *pBuffer);
 	bool SplitPacket(CIOCPContext *pContext, CIOCPBuffer *pBuffer);
 	void OnPacketError(){ WriteToLog("拆包错误!\r\n");}
+
+protected:
+	void FreePacket();
+
+private:
+	typedef CQueue<PACKET*> CPacketArray;
+	CPacketArray m_listRecvMsg;
+	CPacketArray m_listSendMsg;
+
+	HANDLE m_hRecvWaitEvent, m_hSendWaitEvent;
+	HANDLE m_hRecvThread, m_hSendThread;
+	bool m_bRecvRun, m_bSendRun;
+
+	int m_nFreePacketCount;	
+	int m_nMaxPacketBuffers;
+	PACKET *m_pFreePacketList;
+	CRITICAL_SECTION m_FreePacketListLock;
 };
 #endif

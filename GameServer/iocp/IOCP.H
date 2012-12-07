@@ -9,7 +9,7 @@
 #include <Mswsock.h>
 #define USE_DATA_LONGTH 8192
 #define NET_DATA_LONGTH 4096
-#define BUFFER_SIZE 1024*4		// I/O请求的缓冲区大小
+#define BUFFER_SIZE 1024 * 4		// I/O请求的缓冲区大小
 #define MAX_THREAD	2			// I/O服务线程的数量
 
 
