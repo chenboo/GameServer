@@ -73,7 +73,7 @@ public:
 		return bRet;
 	}
 
-private::
+private:
 	CRITICAL_SECTION m_ListLock;
 };
 
